@@ -427,6 +427,9 @@ def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, 
     if U is not None:
         UPrepModel.fit(U, remove_mean=remove_mean_U, zscore=zscore_U, time_first=time_first)
         U = UPrepModel.apply(U, time_first=time_first)
+
+    # print(U.shape)
+    # print(Y.shape)
     
     ny, ySamples, N, y1, NTot = getHSize(Y, iMax, time_first=time_first)
     if Z is not None:
@@ -626,7 +629,7 @@ def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, 
         w = Xk_Plus1[:n1, :] - XkP1Hat[:n1, :] # Eq.(33)
     else:
         A = np.empty([0, 0])
-        w = np.empty([0, N])
+        w = np.empty([0, np.sum(np.array(N))])
     
     if n2 > 0:
         # A associated with the other states (X2)
