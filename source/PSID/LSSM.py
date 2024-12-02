@@ -359,17 +359,17 @@ class LSSM:
         else:
             return allXp, allYp, allXf, allPp, allPf
 
-    def predict(self, Y, U=None, useXFilt=False, **kwargs):
+    def predict(self, Y, U=None, useXFilt=False, computeLLh = False, **kwargs):
         if isinstance(Y, (list,tuple)): # If segments of data are provided as a list
             for trialInd, trialY in enumerate(Y):
-                trialOuts = self.predict(trialY, U=U if U is None else U[trialInd], useXFilt=useXFilt, **kwargs)
+                trialOuts = self.predict(trialY, U=U if U is None else U[trialInd], useXFilt=useXFilt, computeLLh=computeLLh,**kwargs)
                 if trialInd == 0:
                     outs = [[o] for oi, o in enumerate(trialOuts)]
                 else:
                     outs = [outs[oi]+[o] for oi, o in enumerate(trialOuts)]
             return tuple(outs)
         # If only one data segment is provided
-        allXp, allYp, allXf = self.kalman(Y, U=U, **kwargs)[0:3]
+        allXp, allYp, allXf, allPp, allPf = self.kalman(Y, U=U, return_state_cov=True,**kwargs)#[0:3]
         if useXFilt:
             allXp = allXf
         if (hasattr(self, 'Cz') and self.Cz is not None) or \
@@ -378,4 +378,133 @@ class LSSM:
         else:
             allZp = None
 
-        return allZp, allYp, allXp
+        if computeLLh:
+
+            # Log-likelihood
+
+            A,B,C,D = self.A,self.B,self.C,self.D
+            Q,R     = self.Q,self.R
+
+            # Dimensions
+            T, dim_y = Y.shape
+            
+            # # Calculate innovations for all time steps
+
+            # if U is not None:
+            #     Y_tilde = Y - (allXp @ C.T) - (U @ D.T)
+            # else:
+            #     Y_tilde = Y - (allXp @ C.T)
+            
+            # # Calculate innovation covariances S for all time steps
+            # S_array = C @ allPp @ C.T + R
+            
+            # # Kf = np.linalg.lstsq(ziCov.T, (Pp @ self.C.T).T, rcond=None)[0].T  # Kf(i)
+
+            # #     if self.S.size > 0:
+            # #         Kw = np.linalg.lstsq(ziCov.T, self.S.T, rcond=None)[0].T   # Kw(i)
+            # #         K = self.A @ Kf + Kw                    # K(i)
+
+            # # Compute log-determinants and inverses for all S matrices
+            # S_inv = np.linalg.inv(S_array)
+            # S_det_log = np.log(np.linalg.det(S_array))
+            
+            # # Calculate log-likelihood for all time steps at once
+            # quadratic_terms = np.einsum('ti, tij, tj -> t', Y_tilde, S_inv, Y_tilde)
+            
+            # log_likelihood = -0.5 * np.sum(S_det_log + quadratic_terms + dim_y * np.log(2 * np.pi))
+            
+            log_likelihood = 0
+
+            for t in range(T):
+
+                # Prediction step
+                x_hat = allXp[t,:].reshape(-1,1)
+                # P = A @ P @ A.T + Q
+                P = allPp[t,:,:]
+
+                if U is not None:
+                    # Leaky input in observation equation
+                    y_tilde = Y[t,:].reshape(-1, 1) - C @ x_hat - D @ U[t,:].reshape(-1, 1)
+
+                else:
+                    y_tilde = Y[t,:].reshape(-1, 1) - C @ x_hat
+                
+                # Measurement update step
+                S = C @ P @ C.T + R  # Innovation covariance
+                # K = P @ C.T @ np.linalg.inv(S)  # Kalman gain
+
+                # Log-likelihood update
+                log_likelihood -= 0.5 * (np.log(np.linalg.det(S)) + y_tilde.T @ np.linalg.inv(S) @ y_tilde + dim_y * np.log(2 * np.pi))
+
+            print(log_likelihood)
+
+        else:
+        
+            log_likelihood = None
+
+        return allZp, allYp, allXp, log_likelihood
+    
+    def compute_LogLikelihood(self,yList,uList=None,time_first=True):
+
+        A,B,C,D = self.A,self.B,self.C,self.D
+        Q,R     = self.Q,self.R
+
+        log_likelihood = 0
+
+        if uList is None:
+            uList = [None]*len(yList)
+
+        for Y,U in zip(yList,uList):
+
+            allXp, allYp, allXf,allPp,allPf = self.kalman(Y, U=U, return_state_cov=True)
+
+            if not time_first:
+
+                Y = Y.T
+
+                if U is not None:
+                    U = U.T
+
+            T,dim_y = Y.shape
+
+            # Y_tilde = Y - C @ allXp.T - D @ U.T
+            # allS = C @ P @ C.T + R  # Innovation covariance
+
+            for t in range(T):
+
+                # Prediction step
+                x_hat = allXp[t,:].reshape(-1,1)
+                # P = A @ P @ A.T + Q
+                P = allPp[t,:,:]
+
+                if U is not None:
+                    # Leaky input in observation equation
+                    y_tilde = Y[t,:].reshape(-1, 1) - C @ x_hat - D @ U[t,:].reshape(-1, 1)
+
+                else:
+                    y_tilde = Y[t,:].reshape(-1, 1) - C @ x_hat
+                
+                # Measurement update step
+                S = C @ P @ C.T + R  # Innovation covariance
+                # K = P @ C.T @ np.linalg.inv(S)  # Kalman gain
+
+                # Log-likelihood update
+                log_likelihood -= 0.5 * (np.log(np.linalg.det(S)) + y_tilde.T @ np.linalg.inv(S) @ y_tilde + dim_y * np.log(2 * np.pi))
+
+        return log_likelihood
+        
+    def compute_AIC(self,yList,uList=None,time_first=True):
+
+        log_likelihood = self.compute_LogLikelihood(yList,uList,time_first=time_first)
+
+        yDim = self.output_dim
+        xDim = self.state_dim
+        uDim = self.input_dim
+
+        n_params = 2*xDim**2 + xDim*uDim + yDim*xDim + yDim*uDim + yDim**2
+
+        return 2*n_params - 2*log_likelihood,log_likelihood
+
+
+            
+    

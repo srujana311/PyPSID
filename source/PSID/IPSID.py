@@ -255,7 +255,7 @@ def combineIdSysWithEps(s, s3, missing_marker):
     return newSys
 
 def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, \
-                fit_Cz_via_KF=True, time_first=True, \
+                fit_Cz_via_KF=True, time_first=True, delay=False,\
                 remove_mean_Y=True, remove_mean_Z=True, remove_mean_U=True, 
                 zscore_Y=False, zscore_Z=False, zscore_U=False, 
                 missing_marker=None, remove_nonYrelated_fromX1=False, n_pre=np.inf, n3=0) -> LSSM:
@@ -472,11 +472,23 @@ def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, 
         WS['Yf'] = blkhankskip(Y, iY, N, iMax, time_first=time_first)
         WS['Yii'] = blkhankskip(Y, 1, N, iMax, time_first=time_first)
         if nu > 0:
-            WS['Up'] = blkhankskip(U, iU, N, iMax-iU, time_first=time_first)
+            
             WS['Uf'] = blkhankskip(U, iU, N, iMax, time_first=time_first)
             WS['Uii'] = blkhankskip(U, 1, N, iMax, time_first=time_first)
+            
+            if delay:
+                WS['Up'] = WS['Uf']
+            else:
+                WS['Up'] = blkhankskip(U, iU, N, iMax-iU, time_first=time_first)
+            
         else:
-            WS['Up'] = np.empty( (0, N) )
+            # if isinstance(N,list):
+            #     WS['Up'] = [np.empty((0,k)) for k in N]#np.empty( (0, N) )
+            # else:
+
+            
+
+            WS['Up'] = np.empty((0, WS['Yp'].shape[1]))
             WS['Uf'] = WS['Up']
             WS['Uii'] = WS['Up']
         if nz > 0:
@@ -605,6 +617,14 @@ def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, 
 
             # Take SVD of YHatObUfRes
             WS['YHatObUfRes_U'], WS['YHatObUfRes_S'], YHat_V = linalg.svd(WS['YHatObUfRes'], full_matrices=False, lapack_driver='gesvd') # Eq.(27)
+
+            # Wr = sqrt(inv(removeProjOrth(Yf,Uf)*Yf'));
+            # Wc = sqrt(inv(removeProjOrth([Up; Yp],Uf)*[Up; Yp]'));
+                          
+            # Wr = np.sqrt(np.linalg.inv(removeProjOrth(WS['Yf'],WS['Uf'])@WS['Yf'].T))
+            # Wc = np.sqrt(np.linalg.inv(removeProjOrth(np.concatenate(WS['Up'],WS['Yp']),WS['Uf'])@WS['Yf'].T))
+
+            # _,WS['Normalized_S'],_ =  linalg.svd(Wr@WS['YHatObUfRes']@Wc, full_matrices=False, lapack_driver='gesvd') # Eq.(27)
     
         S2 = np.diag(WS['YHatObUfRes_S'][:n2])
         U2 = WS['YHatObUfRes_U'][:, :n2]
@@ -642,7 +662,12 @@ def IPSID(Y, Z=None, U=None, nx=None, n1=0, i=None, WS=dict(), return_WS=False, 
             A = np.concatenate((A10, A23))  
         else:
             A = A23
+        # print(w.shape)
+        # print(Xk_Plus1.shape)
+        # print(XkP2Hat.shape)
         w = np.concatenate((w, Xk_Plus1[n1:, :] - XkP2Hat)) # Eq.(34)
+
+    # print(f'nz = {nz}')
 
     if nz > 0:
         ZiiHat, CzTmp = projOrth(WS['Zii'], np.concatenate(
